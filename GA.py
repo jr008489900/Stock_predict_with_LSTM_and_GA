@@ -1,19 +1,18 @@
 from abc import abstractmethod
-import struct
 import random
 import sys
-import numpy as np
 import pandas as pd
 from sklearn.datasets import load_iris
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import mean_squared_error
-import lightgbm as lgb
 import warnings
 import matplotlib.pyplot as plt
-import csv
 from keras.models import Sequential
 from keras.layers import Bidirectional, LSTM, Dense
 from sklearn.preprocessing import MinMaxScaler
+import multiprocessing
+import time
+
 
 # 忽略特定警告
 with warnings.catch_warnings():
@@ -138,14 +137,56 @@ class GeneticAlgorithm(Algorithm):
             population.append(individual)
 
         return population
-    def SelectPopulation(self, population):
-        for individual in population:
-            if individual['fitness'] == sys.maxsize:
-                individual['fitness'] = self.Fitness(individual['encoded_string'])
-        population.sort(key=lambda ind: ind['fitness'])
-        print('pop:',population)
-        selected_population = population[:self.init_population_size]
+    
+    
+    def SelectSubsetPopulation(self,subset_population):
+            for individual in subset_population:
+                if individual['fitness'] == sys.maxsize:
+                    individual['fitness'] = self.Fitness(individual['encoded_string'])
+            return subset_population
 
+    def SelectPopulation(self, population):
+        print('population:',population)
+        num_processes = multiprocessing.cpu_count()  # 獲取 CPU 核心數
+
+        if len(population) <= num_processes:
+            # 如果個體數小於等於 CPU 核心數，則將整個 population 視為一個子集
+            selected_population = self.SelectSubsetPopulation(population)
+        else:
+            pool = multiprocessing.Pool(processes=num_processes)
+
+            # 分割 population 爲多個子集，每個子集由一個進程處理
+            chunk_size = len(population) // num_processes
+            remainder = len(population) % num_processes
+            subsets = []
+            for i in range(num_processes):
+                subsets.append([])
+            for i in range(chunk_size):
+                for j in range(num_processes):
+                    index = i * num_processes + j
+                    if index < len(population):
+                        subsets[j].append(population[index])
+             # 将余数均匀分配到子集中
+            for i in range(remainder):
+                index = chunk_size * num_processes + i
+                subsets[i].append(population[index])
+            print('subsets:',subsets)
+
+            # 使用多進程處理子集
+            selected_subsets = pool.map(self.SelectSubsetPopulation, subsets)
+            # 关闭进程池
+            pool.close()
+
+            # 等待所有子进程完成
+            pool.join()
+
+            # 合併選擇的子集
+            selected_population = [item for sublist in selected_subsets for item in sublist]
+            # 对 selected_population 进行排序
+        
+        selected_population.sort(key=lambda ind: ind['fitness'])
+        print('selected population:',selected_population)
+        selected_population = selected_population[:self.init_population_size ]
         return selected_population
     
     def EnforceParameterRange(self, encoded_string):
@@ -264,14 +305,25 @@ class GeneticAlgorithm(Algorithm):
         print(f"Mean Squared Error: {mse:.4f}")
         return mse
 
+def main():
+    # 记录开始时间
+    start_time = time.time()
+
+    ga = GeneticAlgorithm(layer1=32, layer2=32, layer3=32,epochs=7)
+    # encodestr = ga.Encode(layer1=32, layer2=32, layer3=32,epochs=7)
+    # decodestr = ga.Decode(encodestr)
+    # print(encodestr)
+    # print(decodestr)
+    result=ga.result()
+    print(result)
+    # 记录结束时间
+    end_time = time.time()
+    # 计算执行时间
+    execution_time = end_time - start_time
+    print(f"execution time: %.2f seconds" %execution_time)
 
 
+if __name__ == "__main__":
+    multiprocessing.freeze_support()
+    main()
 
-
-ga = GeneticAlgorithm(layer1=32, layer2=32, layer3=32,epochs=7)
-# encodestr = ga.Encode(layer1=32, layer2=32, layer3=32,epochs=7)
-# decodestr = ga.Decode(encodestr)
-# print(encodestr)
-# print(decodestr)
-result=ga.result()
-print(result)
